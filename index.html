@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GrowthLab CRM</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50:'#f0fdf4',100:'#dcfce7',200:'#bbf7d0',300:'#86efac',400:'#4ade80',500:'#22c55e',600:'#16a34a',700:'#15803d',800:'#166534',900:'#14532d',950:'#052e16' },
+            surface: { 0:'#ffffff',1:'#f8faf9',2:'#f0f5f2',3:'#e2ebe5' },
+            ink: { 1:'#0f1a14',2:'#3d4f44',3:'#6b7f72',4:'#9aac9e' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+    .fade-in { animation: fadeIn 0.2s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body class="bg-surface-1 text-ink-1">
+  <div class="flex min-h-screen" id="app">
+    <!-- Sidebar -->
+    <aside class="w-64 bg-[#0f1a14] text-white flex flex-col min-h-screen flex-shrink-0" id="sidebar"></aside>
+    <!-- Main -->
+    <main class="flex-1 overflow-auto" id="main"></main>
+  </div>
+
+  <!-- Modal -->
+  <div id="modal" class="fixed inset-0 bg-black/40 z-50 hidden flex items-center justify-center p-4">
+    <div id="modal-content" class="bg-white rounded-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto shadow-2xl fade-in"></div>
+  </div>
+
+  <script>
+  // ========== DATA ==========
+  const now = new Date();
+  const daysAgo = n => new Date(now.getTime() - n*86400000).toISOString().split('T')[0];
+
+  const contacts = [
+    { id:'c001', name:'Aisha Patel', email:'aisha@startupventure.com', source:'App signup', persona:'Founder', track:'Self-serve', lifecycleStage:'Pro customer', geography:'Singapore', company:'StartupVenture', createdDate:daysAgo(90), lastActivityDate:daysAgo(2), notes:'Early adopter, active in community forums', activities:[{date:daysAgo(90),type:'import',desc:'Signed up via app'},{date:daysAgo(85),type:'stage',desc:'Lead → Signed up'},{date:daysAgo(45),type:'stage',desc:'Signed up → Activated'},{date:daysAgo(30),type:'stage',desc:'Activated → PQL'},{date:daysAgo(14),type:'stage',desc:'PQL → Pro customer'}] },
+    { id:'c002', name:'Marcus Chen', email:'marcus.chen@fintechlab.io', source:'App signup', persona:'Founder', track:'Self-serve', lifecycleStage:'PQL', geography:'Singapore', company:'FintechLab', createdDate:daysAgo(45), lastActivityDate:daysAgo(1), notes:'Hit free tier limits twice, strong conversion signal', activities:[{date:daysAgo(45),type:'import',desc:'Signed up via app'},{date:daysAgo(20),type:'stage',desc:'Signed up → Activated'},{date:daysAgo(5),type:'stage',desc:'Activated → PQL'}] },
+    { id:'c003', name:'Priya Sharma', email:'priya@edtech.sg', source:'App signup', persona:'Founder', track:'Self-serve', lifecycleStage:'Activated', geography:'Singapore', company:'EduTech SG', createdDate:daysAgo(30), lastActivityDate:daysAgo(3), notes:'', activities:[{date:daysAgo(30),type:'import',desc:'Signed up via app'},{date:daysAgo(10),type:'stage',desc:'Signed up → Activated'}] },
+    { id:'c004', name:'James Wong', email:'j.wong@greentech.co', source:'Social referral', persona:'Founder', track:'Self-serve', lifecycleStage:'Signed up', geography:'Malaysia', company:'GreenTech', createdDate:daysAgo(15), lastActivityDate:daysAgo(10), notes:'Referred by Aisha Patel', activities:[{date:daysAgo(15),type:'import',desc:'Referred via LinkedIn'},{date:daysAgo(12),type:'stage',desc:'Lead → Signed up'}] },
+    { id:'c005', name:'Sarah Kim', email:'sarah.kim@uni.edu.sg', source:'App signup', persona:'Student', track:'Self-serve', lifecycleStage:'Activated', geography:'Singapore', company:'NUS', createdDate:daysAgo(60), lastActivityDate:daysAgo(5), notes:'Student founder, working on AI project', activities:[{date:daysAgo(60),type:'import',desc:'Signed up as student'},{date:daysAgo(30),type:'stage',desc:'Signed up → Activated'}] },
+    { id:'c006', name:'David Lim', email:'david.lim@venturecap.sg', source:'Event/Workshop', persona:'Investor', track:'Events', lifecycleStage:'Re-engaged', geography:'Singapore', company:'VentureCap SG', createdDate:daysAgo(60), lastActivityDate:daysAgo(7), notes:'Attended 3 events, signed up for platform after workshop', activities:[{date:daysAgo(60),type:'event',desc:'Attended: Founder-Investor Mixer'},{date:daysAgo(45),type:'event',desc:'Attended: Pitch Night SG'},{date:daysAgo(7),type:'stage',desc:'Attended → Re-engaged'}] },
+    { id:'c007', name:'Mei Lin Tan', email:'meilin@healthstartup.com', source:'Event/Workshop', persona:'Founder', track:'Events', lifecycleStage:'Attended', geography:'Singapore', company:'HealthStartup', createdDate:daysAgo(30), lastActivityDate:daysAgo(14), notes:'Attended GrowthLab workshop, interested in Pro', activities:[{date:daysAgo(30),type:'event',desc:'Registered for: Startup 101 Workshop'},{date:daysAgo(14),type:'stage',desc:'Registered → Attended'}] },
+    { id:'c008', name:'Rajesh Kumar', email:'rajesh@bangalore.tech', source:'Event/Workshop', persona:'Founder', track:'Events', lifecycleStage:'Registered', geography:'India', company:'BangaloreTech', createdDate:daysAgo(7), lastActivityDate:daysAgo(5), notes:'Registered for upcoming virtual pitch night', activities:[{date:daysAgo(7),type:'event',desc:'Registered for: Virtual Pitch Night'}] },
+    { id:'c009', name:'Emma Watson', email:'emma@designstudio.sg', source:'Event/Workshop', persona:'Founder', track:'Events', lifecycleStage:'Attended', geography:'Singapore', company:'DesignStudio SG', createdDate:daysAgo(21), lastActivityDate:daysAgo(14), notes:'', activities:[{date:daysAgo(21),type:'event',desc:'Registered for: Design Thinking Workshop'},{date:daysAgo(14),type:'stage',desc:'Registered → Attended'}] },
+    { id:'c010', name:'Ahmad Hassan', email:'ahmad@logistics.my', source:'Event/Workshop', persona:'Founder', track:'Events', lifecycleStage:'Lead', geography:'Malaysia', company:'LogiFlow MY', createdDate:daysAgo(3), lastActivityDate:daysAgo(3), notes:'Signed up for event newsletter', activities:[{date:daysAgo(3),type:'import',desc:'Added from event interest form'}] },
+    { id:'c011', name:'Chen Wei', email:'chen.wei@bigcorp.sg', source:'Inbound Enterprise', persona:'Organization', track:'Enterprise', lifecycleStage:'In conversation', geography:'Singapore', company:'BigCorp SG', createdDate:daysAgo(20), lastActivityDate:daysAgo(3), notes:'Enterprise inquiry for 50-seat license, meeting scheduled next week', activities:[{date:daysAgo(20),type:'import',desc:'Inbound inquiry via website'},{date:daysAgo(18),type:'stage',desc:'Lead → In conversation'},{date:daysAgo(3),type:'note',desc:'Demo call completed, positive feedback'}] },
+    { id:'c012', name:'Lisa Ng', email:'lisa.ng@corporateventures.com', source:'Inbound Enterprise', persona:'Organization', track:'Enterprise', lifecycleStage:'Lead', geography:'Singapore', company:'Corporate Ventures', createdDate:daysAgo(5), lastActivityDate:daysAgo(5), notes:'Cold inbound, exploring partnership options', activities:[{date:daysAgo(5),type:'import',desc:'Contact form submission'}] },
+    { id:'c013', name:'Yuki Tanaka', email:'yuki@jp-startup.jp', source:'App signup', persona:'Founder', track:'Self-serve', lifecycleStage:'Signed up', geography:'Japan', company:'JP Startup', createdDate:daysAgo(10), lastActivityDate:daysAgo(8), notes:'', activities:[{date:daysAgo(10),type:'import',desc:'Signed up via app'},{date:daysAgo(8),type:'stage',desc:'Lead → Signed up'}] },
+    { id:'c014', name:'Sophie Martin', email:'sophie@frenchtech.fr', source:'Content download', persona:'Founder', track:'Self-serve', lifecycleStage:'Lead', geography:'France', company:'FrenchTech', createdDate:daysAgo(2), lastActivityDate:daysAgo(2), notes:'Downloaded startup toolkit', activities:[{date:daysAgo(2),type:'import',desc:'Downloaded: Startup Growth Toolkit'}] },
+    { id:'c015', name:'Oliver Brown', email:'oliver@angelinvest.sg', source:'Newsletter', persona:'Investor', track:'Self-serve', lifecycleStage:'Lead', geography:'Singapore', company:'Angel Invest SG', createdDate:daysAgo(20), lastActivityDate:daysAgo(15), notes:'Subscribed to newsletter via LinkedIn post', activities:[{date:daysAgo(20),type:'import',desc:'Newsletter subscription'}] },
+    { id:'c016', name:'Nina Patel', email:'nina@socialventure.in', source:'App signup', persona:'Founder', track:'Self-serve', lifecycleStage:'Lead', geography:'India', company:'SocialVenture India', createdDate:daysAgo(1), lastActivityDate:daysAgo(1), notes:'', activities:[{date:daysAgo(1),type:'import',desc:'Signed up via app'}] },
+    { id:'c017', name:'Daniel Lee', email:'daniel@sg-accelerator.sg', source:'Manual', persona:'Organization', track:'Enterprise', lifecycleStage:'Qualified', geography:'Singapore', company:'SG Accelerator', createdDate:daysAgo(40), lastActivityDate:daysAgo(7), notes:'Partnership opportunity discussed, LOI pending', activities:[{date:daysAgo(40),type:'import',desc:'Added manually by team'},{date:daysAgo(35),type:'stage',desc:'Lead → In conversation'},{date:daysAgo(20),type:'stage',desc:'In conversation → Qualified'},{date:daysAgo(7),type:'note',desc:'LOI draft sent for review'}] },
+    { id:'c018', name:'Rachel Wong', email:'rachel@hku.edu.hk', source:'Event/Workshop', persona:'Student', track:'Events', lifecycleStage:'Attended', geography:'Hong Kong', company:'HKU', createdDate:daysAgo(14), lastActivityDate:daysAgo(7), notes:'Student ambassador, interested in campus program', activities:[{date:daysAgo(14),type:'event',desc:'Registered for: Student Founders Webinar'},{date:daysAgo(7),type:'stage',desc:'Registered → Attended'}] },
+    { id:'c019', name:'Tom Nguyen', email:'tom@vietnamstartup.vn', source:'Social referral', persona:'Founder', track:'Self-serve', lifecycleStage:'Signed up', geography:'Vietnam', company:'VN Startup', createdDate:daysAgo(8), lastActivityDate:daysAgo(6), notes:'Referred via Instagram', activities:[{date:daysAgo(8),type:'import',desc:'Social referral from Instagram'},{date:daysAgo(6),type:'stage',desc:'Lead → Signed up'}] },
+    { id:'c020', name:'Amanda Teo', email:'amanda@lawfirm.sg', source:'Inbound Enterprise', persona:'Organization', track:'Enterprise', lifecycleStage:'In conversation', geography:'Singapore', company:'Teo & Partners', createdDate:daysAgo(12), lastActivityDate:daysAgo(4), notes:'Legal services partnership for startup clients', activities:[{date:daysAgo(12),type:'import',desc:'Referral from Daniel Lee'},{date:daysAgo(10),type:'stage',desc:'Lead → In conversation'}] },
+  ];
+
+  // ========== STATE ==========
+  let currentPage = 'dashboard';
+  let filters = { search:'', source:'', persona:'', track:'', stage:'' };
+  let activeTrack = 'Self-serve';
+  let activeSegment = null;
+
+  // ========== HELPERS ==========
+  const initials = name => name.split(' ').map(n=>n[0]).join('');
+  const trackColor = t => t==='Self-serve'?'bg-brand-100 text-brand-700':t==='Events'?'bg-yellow-100 text-yellow-700':'bg-indigo-100 text-indigo-700';
+  const trackDot = t => t==='Self-serve'?'bg-brand-500':t==='Events'?'bg-yellow-500':'bg-indigo-500';
+  const stageBadge = s => {
+    const m = {'Pro customer':'bg-brand-600 text-white','PQL':'bg-purple-100 text-purple-700','Qualified':'bg-brand-600 text-white','Activated':'bg-brand-100 text-brand-700','Re-engaged':'bg-brand-100 text-brand-700','In conversation':'bg-blue-100 text-blue-700','Attended':'bg-orange-100 text-orange-700','Registered':'bg-yellow-100 text-yellow-700','Signed up':'bg-blue-100 text-blue-700','Lead':'bg-gray-100 text-gray-600'};
+    return m[s]||'bg-gray-100 text-gray-600';
+  };
+  const activityIcon = t => ({stage:'🔄',note:'📝',event:'🎪',import:'📥',login:'🔑'})[t]||'📌';
+
+  // ========== RENDER SIDEBAR ==========
+  function renderSidebar() {
+    const nav = [
+      {id:'dashboard',label:'Dashboard',icon:'📊'},
+      {id:'contacts',label:'Contacts',icon:'👥'},
+      {id:'pipeline',label:'Pipeline',icon:'🔄'},
+      {id:'segments',label:'Segments',icon:'🎯'},
+    ];
+    const future = [
+      {label:'Luma Sync',icon:'🔗',ver:'v1.1'},
+      {label:'Behavioral Feed',icon:'📡',ver:'v1.1'},
+      {label:'Automations',icon:'⚡',ver:'v2'},
+      {label:'Reports',icon:'📈',ver:'v2'},
+    ];
+    document.getElementById('sidebar').innerHTML = `
+      <div class="p-6 border-b border-white/10">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 bg-brand-500 rounded-lg flex items-center justify-center text-white font-bold text-sm">GL</div>
+          <div><div class="font-semibold text-sm">GrowthLab</div><div class="text-[11px] text-ink-4">CRM v1.0</div></div>
+        </div>
+      </div>
+      <nav class="flex-1 p-4">
+        <div class="text-[10px] uppercase tracking-wider text-ink-4 mb-3 px-3">Main</div>
+        ${nav.map(n=>`<a href="#" onclick="navigate('${n.id}')" class="flex items-center gap-3 px-3 py-2.5 rounded-lg mb-1 text-sm transition-colors ${currentPage===n.id?'bg-brand-600 text-white':'text-ink-4 hover:bg-white/5 hover:text-white'}">
+          <span class="text-base">${n.icon}</span>${n.label}
+        </a>`).join('')}
+        <div class="text-[10px] uppercase tracking-wider text-ink-4 mb-3 mt-8 px-3">Coming Soon</div>
+        ${future.map(f=>`<div class="flex items-center justify-between px-3 py-2.5 rounded-lg mb-1 text-sm text-ink-4/50 cursor-not-allowed">
+          <div class="flex items-center gap-3"><span class="text-base opacity-50">${f.icon}</span>${f.label}</div>
+          <span class="text-[9px] bg-white/5 px-2 py-0.5 rounded-full text-ink-4">${f.ver}</span>
+        </div>`).join('')}
+      </nav>
+      <div class="p-4 border-t border-white/10"><div class="text-[11px] text-ink-4">Built for GrowthLab 🇸🇬</div></div>
+    `;
+  }
+
+  // ========== DASHBOARD ==========
+  function renderDashboard() {
+    const bySource = {}, byPersona = {}, byTrack = {}, byGeo = {};
+    contacts.forEach(c => {
+      bySource[c.source] = (bySource[c.source]||0)+1;
+      byPersona[c.persona] = (byPersona[c.persona]||0)+1;
+      byTrack[c.track] = (byTrack[c.track]||0)+1;
+      byGeo[c.geography] = (byGeo[c.geography]||0)+1;
+    });
+    const newWeek = contacts.filter(c=>new Date(c.createdDate)>=new Date(daysAgo(7))).length;
+    const activeEnt = contacts.filter(c=>c.track==='Enterprise'&&['In conversation','Qualified'].includes(c.lifecycleStage)).length;
+    const pro = contacts.filter(c=>c.lifecycleStage==='Pro customer').length;
+
+    const barHtml = (data, color) => {
+      const max = Math.max(...Object.values(data),1);
+      return Object.entries(data).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`
+        <div><div class="flex justify-between text-xs mb-1"><span class="text-ink-2">${k}</span><span class="font-medium text-ink-1">${v}</span></div>
+        <div class="w-full bg-surface-2 rounded-full h-2"><div class="h-2 rounded-full" style="width:${(v/max)*100}%;background:${color||'#22c55e'}"></div></div></div>
+      `).join('');
+    };
+
+    const recent = [...contacts].sort((a,b)=>new Date(b.createdDate)-new Date(a.createdDate)).slice(0,5);
+
+    document.getElementById('main').innerHTML = `
+      <div class="p-8 fade-in">
+        <div class="mb-8"><h1 class="text-2xl font-bold text-ink-1">Dashboard</h1><p class="text-sm text-ink-3 mt-1">Overview of all GrowthLab contacts and pipeline activity</p></div>
+        <div class="grid grid-cols-4 gap-4 mb-8">
+          ${statCard('Total Contacts',contacts.length,'All time','+8 this week',true,'👥')}
+          ${statCard('New This Week',newWeek,'Last 7 days','+40% vs last week',true,'📈')}
+          ${statCard('Enterprise Pipeline',activeEnt,'Active conversations','','','🏢')}
+          ${statCard('Pro Customers',pro,'Paying subscribers','Growing',true,'⭐')}
+        </div>
+        <div class="grid grid-cols-2 gap-4 mb-8">
+          <div class="bg-surface-0 rounded-xl border border-surface-3 p-5"><h3 class="text-sm font-semibold text-ink-1 mb-4">Contacts by Source</h3><div class="space-y-3">${barHtml(bySource)}</div></div>
+          <div class="bg-surface-0 rounded-xl border border-surface-3 p-5"><h3 class="text-sm font-semibold text-ink-1 mb-4">Contacts by Track</h3><div class="space-y-3">${barHtml(byTrack,'#22c55e')}</div></div>
+        </div>
+        <div class="grid grid-cols-2 gap-4 mb-8">
+          <div class="bg-surface-0 rounded-xl border border-surface-3 p-5"><h3 class="text-sm font-semibold text-ink-1 mb-4">Contacts by Persona</h3><div class="space-y-3">${barHtml(byPersona,'#6366f1')}</div></div>
+          <div class="bg-surface-0 rounded-xl border border-surface-3 p-5"><h3 class="text-sm font-semibold text-ink-1 mb-4">Contacts by Geography</h3><div class="space-y-3">${barHtml(byGeo,'#f59e0b')}</div></div>
+        </div>
+        <div class="bg-surface-0 rounded-xl border border-surface-3 p-5">
+          <h3 class="text-sm font-semibold text-ink-1 mb-4">Recent Contacts</h3>
+          <table class="w-full text-sm"><thead><tr class="text-left text-xs text-ink-3 border-b border-surface-3"><th class="pb-2">Name</th><th class="pb-2">Source</th><th class="pb-2">Track</th><th class="pb-2">Stage</th><th class="pb-2">Added</th></tr></thead>
+          <tbody>${recent.map(c=>`<tr class="border-b border-surface-2"><td class="py-2.5 font-medium text-ink-1">${c.name}</td><td class="py-2.5 text-ink-2">${c.source}</td><td class="py-2.5"><span class="px-2 py-0.5 rounded-full text-xs ${trackColor(c.track)}">${c.track}</span></td><td class="py-2.5"><span class="px-2 py-0.5 rounded-full text-xs ${stageBadge(c.lifecycleStage)}">${c.lifecycleStage}</span></td><td class="py-2.5 text-ink-3">${c.createdDate}</td></tr>`).join('')}</tbody></table>
+        </div>
+      </div>
+    `;
+  }
+
+  function statCard(label,value,subtitle,trend,trendUp,icon) {
+    return `<div class="bg-surface-0 rounded-xl border border-surface-3 p-5"><div class="flex items-start justify-between"><div><p class="text-xs text-ink-3 font-medium">${label}</p><p class="text-2xl font-bold text-ink-1 mt-1">${value}</p>${subtitle?`<p class="text-xs text-ink-3 mt-1">${subtitle}</p>`:''}${trend?`<p class="text-xs mt-2 font-medium ${trendUp?'text-brand-600':'text-red-500'}">${trendUp?'↑':'↓'} ${trend}</p>`:''}</div><div class="text-2xl">${icon}</div></div></div>`;
+  }
+
+  // ========== CONTACTS ==========
+  function renderContacts() {
+    const sources = ['Event/Workshop','Content download','Social referral','App signup','Newsletter','Inbound Enterprise','Manual'];
+    const personas = ['Founder','Student','Investor','Organization'];
+    const tracks = ['Self-serve','Events','Enterprise'];
+    const stages = ['Lead','Signed up','Activated','PQL','Pro customer','Registered','Attended','Re-engaged','In conversation','Qualified'];
+
+    const filtered = contacts.filter(c => {
+      if (filters.search) {
+        const q = filters.search.toLowerCase();
+        if (!c.name.toLowerCase().includes(q) && !c.email.toLowerCase().includes(q) && !(c.company||'').toLowerCase().includes(q)) return false;
+      }
+      if (filters.source && c.source !== filters.source) return false;
+      if (filters.persona && c.persona !== filters.persona) return false;
+      if (filters.track && c.track !== filters.track) return false;
+      if (filters.stage && c.lifecycleStage !== filters.stage) return false;
+      return true;
+    });
+
+    const hasF = filters.search||filters.source||filters.persona||filters.track||filters.stage;
+
+    const sel = (id, opts, val) => `<select onchange="filters.${id}=this.value;renderContacts()" class="px-3 py-2 text-sm border border-surface-3 rounded-lg bg-surface-1 focus:outline-none focus:ring-2 focus:ring-brand-500"><option value="">All ${id==='stage'?'Stages':id.charAt(0).toUpperCase()+id.slice(1)+'s'}</option>${opts.map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}</select>`;
+
+    document.getElementById('main').innerHTML = `
+      <div class="p-8 fade-in">
+        <div class="flex items-center justify-between mb-6">
+          <div><h1 class="text-2xl font-bold text-ink-1">Contacts</h1><p class="text-sm text-ink-3 mt-1">${filtered.length} of ${contacts.length} contacts</p></div>
+          <div class="flex gap-2">
+            <button class="px-4 py-2 text-sm bg-white border border-surface-3 rounded-lg text-ink-2 hover:bg-surface-2 transition-colors">📤 Export CSV</button>
+            <button class="px-4 py-2 text-sm bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">+ Add Contact</button>
+          </div>
+        </div>
+        <div class="bg-surface-0 rounded-xl border border-surface-3 p-4 mb-6">
+          <div class="flex items-center gap-3 flex-wrap">
+            <input type="text" placeholder="Search by name, email, or company..." value="${filters.search}" oninput="filters.search=this.value;renderContacts()" class="flex-1 min-w-[200px] px-3 py-2 text-sm border border-surface-3 rounded-lg bg-surface-1 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+            ${sel('source',sources,filters.source)}
+            ${sel('persona',personas,filters.persona)}
+            ${sel('track',tracks,filters.track)}
+            ${sel('stage',stages,filters.stage)}
+            ${hasF?`<button onclick="filters={search:'',source:'',persona:'',track:'',stage:''};renderContacts()" class="px-3 py-2 text-sm text-ink-3 hover:text-ink-1 transition-colors">Clear all</button>`:''}
+          </div>
+        </div>
+        <div class="bg-surface-0 rounded-xl border border-surface-3 overflow-hidden">
+          <table class="w-full text-sm">
+            <thead><tr class="text-left text-xs text-ink-3 bg-surface-1 border-b border-surface-3"><th class="px-4 py-3">Contact</th><th class="px-4 py-3">Source</th><th class="px-4 py-3">Persona</th><th class="px-4 py-3">Track</th><th class="px-4 py-3">Stage</th><th class="px-4 py-3">Geography</th><th class="px-4 py-3">Last Active</th></tr></thead>
+            <tbody>
+              ${filtered.map(c=>`<tr onclick="showContact('${c.id}')" class="border-b border-surface-2 hover:bg-surface-1 cursor-pointer transition-colors">
+                <td class="px-4 py-3"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 text-xs font-semibold">${initials(c.name)}</div><div><div class="font-medium text-ink-1">${c.name}</div><div class="text-xs text-ink-3">${c.email}</div></div></div></td>
+                <td class="px-4 py-3 text-ink-2">${c.source}</td>
+                <td class="px-4 py-3"><span class="px-2 py-0.5 rounded-full text-xs bg-surface-2 text-ink-2">${c.persona}</span></td>
+                <td class="px-4 py-3"><span class="px-2 py-0.5 rounded-full text-xs font-medium ${trackColor(c.track)}">${c.track}</span></td>
+                <td class="px-4 py-3"><span class="text-xs font-medium text-ink-2">${c.lifecycleStage}</span></td>
+                <td class="px-4 py-3 text-ink-3">${c.geography}</td>
+                <td class="px-4 py-3 text-ink-3">${c.lastActivityDate}</td>
+              </tr>`).join('')}
+              ${filtered.length===0?'<tr><td colspan="7" class="px-4 py-12 text-center text-ink-3">No contacts match your filters</td></tr>':''}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  // ========== PIPELINE ==========
+  function renderPipeline() {
+    const trackStages = {'Self-serve':['Lead','Signed up','Activated','PQL','Pro customer'],'Events':['Lead','Registered','Attended','Re-engaged'],'Enterprise':['Lead','In conversation','Qualified']};
+    const trackBtnColors = {'Self-serve':'#22c55e','Events':'#f59e0b','Enterprise':'#6366f1'};
+    const stages = trackStages[activeTrack];
+    const trackContacts = contacts.filter(c=>c.track===activeTrack);
+
+    document.getElementById('main').innerHTML = `
+      <div class="p-8 fade-in">
+        <div class="mb-6"><h1 class="text-2xl font-bold text-ink-1">Pipeline</h1><p class="text-sm text-ink-3 mt-1">Visual pipeline for each GrowthLab track</p></div>
+        <div class="flex gap-2 mb-6">
+          ${Object.keys(trackStages).map(t=>`<button onclick="activeTrack='${t}';renderPipeline()" class="px-4 py-2 text-sm rounded-lg font-medium transition-colors ${activeTrack===t?'text-white':'bg-surface-0 border border-surface-3 text-ink-2 hover:bg-surface-2'}" ${activeTrack===t?`style="background:${trackBtnColors[t]}"`:''}>${t} (${contacts.filter(c=>c.track===t).length})</button>`).join('')}
+        </div>
+        <div class="flex gap-4 overflow-x-auto pb-4">
+          ${stages.map(stage=>{
+            const sc = trackContacts.filter(c=>c.lifecycleStage===stage);
+            return `<div class="flex-shrink-0 w-72 bg-surface-2 rounded-xl p-3">
+              <div class="flex items-center justify-between mb-3 px-1"><h3 class="text-sm font-semibold text-ink-1">${stage}</h3><span class="text-xs bg-surface-0 text-ink-3 px-2 py-0.5 rounded-full font-medium">${sc.length}</span></div>
+              <div class="space-y-2">
+                ${sc.map(c=>`<div onclick="showContact('${c.id}')" class="bg-surface-0 rounded-lg p-3 cursor-pointer hover:shadow-md transition-shadow border border-surface-3">
+                  <div class="flex items-center gap-2 mb-2"><div class="w-7 h-7 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 text-[10px] font-semibold">${initials(c.name)}</div><div><div class="text-sm font-medium text-ink-1">${c.name}</div><div class="text-[11px] text-ink-3">${c.company||c.email}</div></div></div>
+                  <div class="flex items-center gap-2"><span class="text-[10px] px-2 py-0.5 rounded-full bg-surface-2 text-ink-3">${c.source}</span><span class="text-[10px] px-2 py-0.5 rounded-full bg-surface-2 text-ink-3">${c.geography}</span></div>
+                </div>`).join('')}
+                ${sc.length===0?'<div class="text-center py-6 text-xs text-ink-4">No contacts</div>':''}
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+        ${activeTrack==='Enterprise'?`<div class="mt-6 bg-indigo-50 border border-indigo-200 rounded-xl p-4"><div class="flex items-start gap-3"><span class="text-lg">🔜</span><div><h4 class="text-sm font-semibold text-indigo-900">Enterprise Pipeline — v2 Roadmap</h4><p class="text-xs text-indigo-700 mt-1">Future versions will add deal values, forecasting, quota tracking, and stage exit criteria. This view captures and categorizes Enterprise contacts so none are lost.</p></div></div></div>`:''}
+      </div>
+    `;
+  }
+
+  // ========== SEGMENTS ==========
+  const presetSegments = [
+    {id:'s1',name:'All Founders',desc:'Every founder across all tracks',filter:c=>c.persona==='Founder'},
+    {id:'s2',name:'Enterprise Pipeline',desc:'Active Enterprise conversations',filter:c=>c.track==='Enterprise'},
+    {id:'s3',name:'Singapore Investors',desc:'Investors based in Singapore',filter:c=>c.persona==='Investor'&&c.geography==='Singapore'},
+    {id:'s4',name:'PQLs & Pro Customers',desc:'Product-qualified leads and paying customers',filter:c=>['PQL','Pro customer'].includes(c.lifecycleStage)},
+    {id:'s5',name:'India Contacts',desc:'All contacts from India',filter:c=>c.geography==='India'},
+    {id:'s6',name:'Event Attendees',desc:'People who attended GrowthLab events',filter:c=>c.track==='Events'},
+  ];
+
+  function renderSegments() {
+    const seg = activeSegment?presetSegments.find(s=>s.id===activeSegment):null;
+    const segContacts = seg?contacts.filter(seg.filter):[];
+
+    document.getElementById('main').innerHTML = `
+      <div class="p-8 fade-in">
+        <div class="flex items-center justify-between mb-6">
+          <div><h1 class="text-2xl font-bold text-ink-1">Segments</h1><p class="text-sm text-ink-3 mt-1">Pre-built segments for common GrowthLab queries</p></div>
+          <button class="px-4 py-2 text-sm bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">+ Create Segment</button>
+        </div>
+        <div class="grid grid-cols-3 gap-4 mb-6">
+          ${presetSegments.map(s=>{
+            const count = contacts.filter(s.filter).length;
+            return `<button onclick="activeSegment=activeSegment==='${s.id}'?null:'${s.id}';renderSegments()" class="text-left p-4 rounded-xl border transition-all ${activeSegment===s.id?'border-brand-500 bg-brand-50 ring-2 ring-brand-200':'border-surface-3 bg-surface-0 hover:border-brand-300'}">
+              <div class="flex items-center justify-between mb-2"><h3 class="text-sm font-semibold text-ink-1">${s.name}</h3><span class="text-lg font-bold text-brand-600">${count}</span></div>
+              <p class="text-xs text-ink-3">${s.desc}</p>
+            </button>`;
+          }).join('')}
+        </div>
+        ${seg?`
+          <div class="bg-surface-0 rounded-xl border border-surface-3 overflow-hidden">
+            <div class="px-4 py-3 bg-surface-1 border-b border-surface-3 flex items-center justify-between">
+              <h3 class="text-sm font-semibold text-ink-1">${seg.name} — ${segContacts.length} contacts</h3>
+              <button class="text-xs text-brand-600 hover:text-brand-700 font-medium">📤 Export to CSV</button>
+            </div>
+            <table class="w-full text-sm">
+              <thead><tr class="text-left text-xs text-ink-3 border-b border-surface-3"><th class="px-4 py-2">Contact</th><th class="px-4 py-2">Source</th><th class="px-4 py-2">Track</th><th class="px-4 py-2">Stage</th><th class="px-4 py-2">Geography</th></tr></thead>
+              <tbody>${segContacts.map(c=>`<tr onclick="showContact('${c.id}')" class="border-b border-surface-2 hover:bg-surface-1 cursor-pointer">
+                <td class="px-4 py-2.5"><div class="font-medium text-ink-1">${c.name}</div><div class="text-xs text-ink-3">${c.email}</div></td>
+                <td class="px-4 py-2.5 text-ink-2">${c.source}</td>
+                <td class="px-4 py-2.5"><span class="text-xs px-2 py-0.5 rounded-full ${trackColor(c.track)}">${c.track}</span></td>
+                <td class="px-4 py-2.5 text-xs font-medium text-ink-2">${c.lifecycleStage}</td>
+                <td class="px-4 py-2.5 text-ink-3">${c.geography}</td>
+              </tr>`).join('')}</tbody>
+            </table>
+          </div>
+        `:''}
+        <div class="mt-6 bg-surface-0 border border-surface-3 rounded-xl p-4">
+          <div class="flex items-start gap-3"><span class="text-lg">🎯</span><div><h4 class="text-sm font-semibold text-ink-1">Custom Segments — Coming in v1.1</h4><p class="text-xs text-ink-3 mt-1">Build your own segments with a visual filter builder. Combine any combination of source, persona, track, stage, and geography to create custom views of your contact database.</p></div></div>
+        </div>
+      </div>
+    `;
+  }
+
+  // ========== MODAL ==========
+  function showContact(id) {
+    const c = contacts.find(x=>x.id===id);
+    if(!c) return;
+    document.getElementById('modal-content').innerHTML = `
+      <div class="p-6 border-b border-surface-3">
+        <div class="flex items-start justify-between">
+          <div class="flex items-center gap-4">
+            <div class="w-12 h-12 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-semibold text-lg">${initials(c.name)}</div>
+            <div><h2 class="text-lg font-semibold text-ink-1">${c.name}</h2><p class="text-sm text-ink-3">${c.email}</p>${c.company?`<p class="text-xs text-ink-4 mt-0.5">${c.company} · ${c.geography}</p>`:''}</div>
+          </div>
+          <button onclick="closeModal()" class="text-ink-3 hover:text-ink-1 transition-colors text-xl">✕</button>
+        </div>
+      </div>
+      <div class="p-6 border-b border-surface-3">
+        <div class="flex flex-wrap gap-2">
+          <span class="px-3 py-1 rounded-full text-xs font-medium bg-surface-2 text-ink-2">${c.source}</span>
+          <span class="px-3 py-1 rounded-full text-xs font-medium bg-surface-2 text-ink-2">${c.persona}</span>
+          <span class="px-3 py-1 rounded-full text-xs font-medium bg-surface-2 text-ink-2">${c.track}</span>
+          <span class="px-3 py-1 rounded-full text-xs font-medium ${stageBadge(c.lifecycleStage)}">${c.lifecycleStage}</span>
+        </div>
+      </div>
+      ${c.notes?`<div class="p-6 border-b border-surface-3"><h3 class="text-xs font-semibold text-ink-3 uppercase tracking-wide mb-2">Notes</h3><p class="text-sm text-ink-2">${c.notes}</p></div>`:''}
+      <div class="p-6">
+        <h3 class="text-xs font-semibold text-ink-3 uppercase tracking-wide mb-3">Activity Log</h3>
+        <div class="space-y-3">
+          ${[...c.activities].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(a=>`
+            <div class="flex items-start gap-3 text-sm">
+              <span class="text-base mt-0.5">${activityIcon(a.type)}</span>
+              <div class="flex-1"><p class="text-ink-2">${a.desc}</p><p class="text-xs text-ink-4">${a.date}</p></div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+    document.getElementById('modal').classList.remove('hidden');
+  }
+
+  function closeModal() {
+    document.getElementById('modal').classList.add('hidden');
+  }
+
+  document.getElementById('modal').addEventListener('click', e => {
+    if (e.target === document.getElementById('modal')) closeModal();
+  });
+
+  // ========== NAVIGATION ==========
+  function navigate(page) {
+    currentPage = page;
+    renderSidebar();
+    if (page === 'dashboard') renderDashboard();
+    else if (page === 'contacts') renderContacts();
+    else if (page === 'pipeline') renderPipeline();
+    else if (page === 'segments') renderSegments();
+  }
+
+  // ========== INIT ==========
+  renderSidebar();
+  renderDashboard();
+  </script>
+</body>
+</html>
