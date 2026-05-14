@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GrowthLab CRM</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
   <script>
     tailwind.config = {
       theme: {
@@ -74,6 +75,7 @@
   let filters = { search:'', source:'', persona:'', track:'', stage:'' };
   let activeTrack = 'Self-serve';
   let activeSegment = null;
+  let importState = { file:null, rows:[], headers:[], mapping:{}, step:1, duplicates:0, preview:[] };
 
   // ========== HELPERS ==========
   const initials = name => name.split(' ').map(n=>n[0]).join('');
@@ -92,6 +94,7 @@
       {id:'contacts',label:'Contacts',icon:'👥'},
       {id:'pipeline',label:'Pipeline',icon:'🔄'},
       {id:'segments',label:'Segments',icon:'🎯'},
+      {id:'import',label:'Import',icon:'📥'},
     ];
     const future = [
       {label:'Luma Sync',icon:'🔗',ver:'v1.1'},
@@ -370,6 +373,267 @@
     if (e.target === document.getElementById('modal')) closeModal();
   });
 
+  // ========== IMPORT ==========
+  const requiredFields = ['name','email'];
+  const optionalFields = ['source','persona','track','lifecycleStage','geography','company','notes'];
+  const allFields = [...requiredFields, ...optionalFields];
+  const sourceOptions = ['Event/Workshop','Content download','Social referral','App signup','Newsletter','Inbound Enterprise','Manual'];
+  const personaOptions = ['Founder','Student','Investor','Organization'];
+  const trackOptions = ['Self-serve','Events','Enterprise'];
+
+  function handleFileSelect(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    processFile(file);
+  }
+
+  function handleDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const file = e.dataTransfer.files[0];
+    if (file) processFile(file);
+  }
+
+  function processFile(file) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, {type:'array'});
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(sheet, {defval:''});
+      if (json.length === 0) { alert('No data found in file'); return; }
+
+      const headers = Object.keys(json[0]);
+      // Auto-map columns
+      const mapping = {};
+      headers.forEach(h => {
+        const lower = h.toLowerCase().replace(/[^a-z]/g,'');
+        if (lower.includes('name') && !lower.includes('company')) mapping[h] = 'name';
+        else if (lower.includes('email') || lower.includes('mail')) mapping[h] = 'email';
+        else if (lower.includes('company') || lower.includes('organization') || lower.includes('org')) mapping[h] = 'company';
+        else if (lower.includes('source') || lower.includes('channel')) mapping[h] = 'source';
+        else if (lower.includes('persona') || lower.includes('type') || lower.includes('role')) mapping[h] = 'persona';
+        else if (lower.includes('track') || lower.includes('pipeline')) mapping[h] = 'track';
+        else if (lower.includes('stage') || lower.includes('lifecycle') || lower.includes('status')) mapping[h] = 'lifecycleStage';
+        else if (lower.includes('country') || lower.includes('region') || lower.includes('geo') || lower.includes('location')) mapping[h] = 'geography';
+        else if (lower.includes('note') || lower.includes('comment') || lower.includes('description')) mapping[h] = 'notes';
+      });
+
+      importState = { file, rows: json, headers, mapping, step:2, duplicates:0, preview:[] };
+      renderImport();
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function updateMapping(header, field) {
+    // Remove this field from any other header
+    Object.keys(importState.mapping).forEach(k => {
+      if (importState.mapping[k] === field && k !== header) delete importState.mapping[k];
+    });
+    if (field) importState.mapping[header] = field;
+    else delete importState.mapping[header];
+    renderImport();
+  }
+
+  function generatePreview() {
+    const mapped = Object.entries(importState.mapping).filter(([_,v]) => v);
+    if (!mapped.find(([_,v]) => v === 'email')) { alert('Email field is required for deduplication'); return; }
+    if (!mapped.find(([_,v]) => v === 'name')) { alert('Name field is required'); return; }
+
+    const existingEmails = new Set(contacts.map(c => c.email.toLowerCase()));
+    let duplicates = 0;
+    const preview = importState.rows.map((row, i) => {
+      const contact = { id: 'imp_' + (Date.now()) + '_' + i, activities: [] };
+      mapped.forEach(([header, field]) => {
+        contact[field] = String(row[header] || '').trim();
+      });
+      // Defaults for required fields
+      if (!contact.source) contact.source = 'Manual';
+      if (!contact.persona) contact.persona = 'Founder';
+      if (!contact.track) contact.track = 'Self-serve';
+      if (!contact.lifecycleStage) contact.lifecycleStage = 'Lead';
+      if (!contact.geography) contact.geography = '';
+      contact.createdDate = new Date().toISOString().split('T')[0];
+      contact.lastActivityDate = contact.createdDate;
+      contact.notes = contact.notes || '';
+      contact.activities = [{date:contact.createdDate, type:'import', desc:'Imported from '+(importState.file?.name||'file')}];
+
+      const isDup = existingEmails.has(contact.email.toLowerCase());
+      if (isDup) duplicates++;
+      return { ...contact, _duplicate: isDup, _row: i + 2 };
+    });
+
+    importState.preview = preview;
+    importState.duplicates = duplicates;
+    importState.step = 3;
+    renderImport();
+  }
+
+  function executeImport() {
+    const newContacts = importState.preview.filter(c => !c._duplicate);
+    newContacts.forEach(c => {
+      delete c._duplicate;
+      delete c._row;
+      contacts.push(c);
+    });
+    importState = { file:null, rows:[], headers:[], mapping:{}, step:4, duplicates:importState.duplicates, preview:newContacts };
+    renderImport();
+    renderSidebar(); // Update counts
+  }
+
+  function resetImport() {
+    importState = { file:null, rows:[], headers:[], mapping:{}, step:1, duplicates:0, preview:[] };
+    renderImport();
+  }
+
+  function renderImport() {
+    const { step, headers, mapping, rows, preview, duplicates } = importState;
+
+    let content = '';
+
+    if (step === 1) {
+      // Upload step
+      content = `
+        <div class="text-center">
+          <div id="dropzone" ondrop="handleDrop(event)" ondragover="event.preventDefault();this.classList.add('border-brand-500','bg-brand-50')" ondragleave="this.classList.remove('border-brand-500','bg-brand-50')" 
+            class="border-2 border-dashed border-surface-3 rounded-2xl p-16 mb-6 cursor-pointer hover:border-brand-400 transition-colors" onclick="document.getElementById('fileInput').click()">
+            <div class="text-5xl mb-4">📁</div>
+            <h3 class="text-lg font-semibold text-ink-1 mb-2">Drop your file here</h3>
+            <p class="text-sm text-ink-3 mb-4">Supports Excel (.xlsx, .xls) and CSV files</p>
+            <button class="px-6 py-2.5 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 transition-colors">Browse Files</button>
+          </div>
+          <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" onchange="handleFileSelect(event)" class="hidden">
+          <div class="text-xs text-ink-4">
+            <p class="mb-2">Expected columns: <strong>Name</strong>, <strong>Email</strong>, and optionally Company, Source, Persona, Track, Stage, Geography, Notes</p>
+            <p>Rows with duplicate emails will be flagged before import</p>
+          </div>
+        </div>
+      `;
+    } else if (step === 2) {
+      // Mapping step
+      content = `
+        <div class="mb-6">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h2 class="text-lg font-bold text-ink-1">Map Columns</h2>
+              <p class="text-sm text-ink-3">${rows.length} rows found in ${importState.file?.name}</p>
+            </div>
+            <button onclick="resetImport()" class="text-sm text-ink-3 hover:text-ink-1">✕ Cancel</button>
+          </div>
+          <div class="bg-surface-0 rounded-xl border border-surface-3 p-5 mb-4">
+            <p class="text-xs text-ink-3 mb-4">Match your spreadsheet columns to CRM fields. Required fields: <strong>Name</strong> and <strong>Email</strong>.</p>
+            <div class="grid grid-cols-2 gap-4">
+              ${headers.map(h => `
+                <div class="flex items-center gap-3">
+                  <div class="flex-1">
+                    <label class="text-xs font-medium text-ink-2 block mb-1">${h}</label>
+                    <div class="text-[10px] text-ink-4 truncate">Sample: ${String(rows[0]?.[h]||'').substring(0,40)}</div>
+                  </div>
+                  <select onchange="updateMapping('${h}', this.value)" class="px-3 py-2 text-sm border border-surface-3 rounded-lg bg-surface-1 focus:outline-none focus:ring-2 focus:ring-brand-500">
+                    <option value="">— Skip —</option>
+                    ${allFields.map(f => `<option value="${f}" ${mapping[h]===f?'selected':''}>${f}${requiredFields.includes(f)?' *':''}</option>`).join('')}
+                  </select>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          <div class="flex justify-end gap-3">
+            <button onclick="resetImport()" class="px-4 py-2 text-sm border border-surface-3 rounded-lg text-ink-2 hover:bg-surface-2">Cancel</button>
+            <button onclick="generatePreview()" class="px-6 py-2 text-sm bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700">Preview Import →</button>
+          </div>
+        </div>
+      `;
+    } else if (step === 3) {
+      // Preview step
+      const newCount = preview.filter(c => !c._duplicate).length;
+      content = `
+        <div class="mb-6">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h2 class="text-lg font-bold text-ink-1">Preview Import</h2>
+              <p class="text-sm text-ink-3">Review before importing</p>
+            </div>
+            <button onclick="importState.step=2;renderImport()" class="text-sm text-ink-3 hover:text-ink-1">← Back to mapping</button>
+          </div>
+          <div class="grid grid-cols-3 gap-4 mb-6">
+            <div class="bg-surface-0 rounded-xl border border-surface-3 p-4 text-center">
+              <div class="text-2xl font-bold text-ink-1">${rows.length}</div>
+              <div class="text-xs text-ink-3">Total Rows</div>
+            </div>
+            <div class="bg-surface-0 rounded-xl border border-surface-3 p-4 text-center">
+              <div class="text-2xl font-bold text-brand-600">${newCount}</div>
+              <div class="text-xs text-ink-3">New Contacts</div>
+            </div>
+            <div class="bg-surface-0 rounded-xl border border-surface-3 p-4 text-center">
+              <div class="text-2xl font-bold ${duplicates>0?'text-orange-500':'text-ink-3'}">${duplicates}</div>
+              <div class="text-xs text-ink-3">Duplicates (skipped)</div>
+            </div>
+          </div>
+          ${duplicates > 0 ? `<div class="bg-orange-50 border border-orange-200 rounded-xl p-4 mb-4"><p class="text-sm text-orange-800">⚠️ ${duplicates} duplicate email${duplicates>1?'s':''} found. These will be skipped to maintain data integrity.</p></div>` : ''}
+          <div class="bg-surface-0 rounded-xl border border-surface-3 overflow-hidden mb-4">
+            <div class="max-h-80 overflow-y-auto">
+              <table class="w-full text-sm">
+                <thead class="sticky top-0 bg-surface-1"><tr class="text-left text-xs text-ink-3 border-b border-surface-3">
+                  <th class="px-3 py-2">Status</th><th class="px-3 py-2">Name</th><th class="px-3 py-2">Email</th><th class="px-3 py-2">Source</th><th class="px-3 py-2">Persona</th><th class="px-3 py-2">Track</th>
+                </tr></thead>
+                <tbody>
+                  ${preview.slice(0,50).map(c => `
+                    <tr class="border-b border-surface-2 ${c._duplicate?'bg-orange-50 opacity-60':''}">
+                      <td class="px-3 py-2">${c._duplicate?'<span class="text-xs text-orange-500">⚠ Dup</span>':'<span class="text-xs text-brand-600">✓ New</span>'}</td>
+                      <td class="px-3 py-2 font-medium text-ink-1">${c.name}</td>
+                      <td class="px-3 py-2 text-ink-3">${c.email}</td>
+                      <td class="px-3 py-2 text-ink-2">${c.source}</td>
+                      <td class="px-3 py-2"><span class="px-2 py-0.5 rounded-full text-xs bg-surface-2 text-ink-2">${c.persona}</span></td>
+                      <td class="px-3 py-2"><span class="px-2 py-0.5 rounded-full text-xs ${trackColor(c.track)}">${c.track}</span></td>
+                    </tr>
+                  `).join('')}
+                  ${preview.length > 50 ? `<tr><td colspan="6" class="px-3 py-2 text-center text-xs text-ink-4">... and ${preview.length - 50} more rows</td></tr>` : ''}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="flex justify-end gap-3">
+            <button onclick="resetImport()" class="px-4 py-2 text-sm border border-surface-3 rounded-lg text-ink-2 hover:bg-surface-2">Cancel</button>
+            <button onclick="executeImport()" class="px-6 py-2.5 text-sm bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700">📥 Import ${newCount} Contacts</button>
+          </div>
+        </div>
+      `;
+    } else if (step === 4) {
+      // Success step
+      content = `
+        <div class="text-center py-8">
+          <div class="text-5xl mb-4">✅</div>
+          <h2 class="text-xl font-bold text-ink-1 mb-2">Import Complete!</h2>
+          <p class="text-sm text-ink-3 mb-6">${preview.length} contacts imported successfully${duplicates > 0 ? ` (${duplicates} duplicates skipped)` : ''}</p>
+          <div class="flex justify-center gap-3">
+            <button onclick="resetImport()" class="px-4 py-2 text-sm border border-surface-3 rounded-lg text-ink-2 hover:bg-surface-2">Import Another File</button>
+            <button onclick="navigate('contacts')" class="px-6 py-2 text-sm bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700">View Contacts →</button>
+          </div>
+        </div>
+      `;
+    }
+
+    document.getElementById('main').innerHTML = `
+      <div class="p-8 fade-in">
+        <div class="mb-6">
+          <h1 class="text-2xl font-bold text-ink-1">Import Contacts</h1>
+          <p class="text-sm text-ink-3 mt-1">Upload Excel or CSV from any system — Luma, Eventbrite, Mailchimp, spreadsheets</p>
+        </div>
+        <!-- Progress steps -->
+        <div class="flex items-center gap-2 mb-8">
+          ${[{n:1,label:'Upload'},{n:2,label:'Map Columns'},{n:3,label:'Preview'},{n:4,label:'Done'}].map(s => `
+            <div class="flex items-center gap-2">
+              <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold ${step>=s.n?'bg-brand-600 text-white':'bg-surface-3 text-ink-4'}">${step>s.n?'✓':s.n}</div>
+              <span class="text-xs ${step>=s.n?'text-ink-1 font-medium':'text-ink-4'}">${s.label}</span>
+              ${s.n<4?'<div class="w-8 h-px bg-surface-3"></div>':''}
+            </div>
+          `).join('')}
+        </div>
+        ${content}
+      </div>
+    `;
+  }
+
   // ========== NAVIGATION ==========
   function navigate(page) {
     currentPage = page;
@@ -378,6 +642,7 @@
     else if (page === 'contacts') renderContacts();
     else if (page === 'pipeline') renderPipeline();
     else if (page === 'segments') renderSegments();
+    else if (page === 'import') renderImport();
   }
 
   // ========== INIT ==========
