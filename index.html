@@ -135,7 +135,8 @@
   // ========== EXPORT CSV ==========
   function exportCSV(data, filename) {
     const headers = ['name','email','company','source','persona','track','lifecycleStage','geography','createdDate','lastActivityDate','notes'];
-    const rows = data.map(c => headers.map(h => `"${String(c[h]||'').replace(/"/g,'""')}"`).join(','));
+    const esc = s => String(s||'').split('"').join('""');
+    const rows = data.map(c => headers.map(h => `"${esc(c[h])}"`).join(','));
     const csv = [headers.join(','), ...rows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -358,7 +359,6 @@
   }
 
   // ========== MODAL RENDER ==========
-  const activityIcon = t => ({stage:'🔄',note:'📝',event:'🎪',import:'📥',login:'🔑'})[t]||'📌';
 
   // ========== RENDER SIDEBAR ==========
   function renderSidebar() {
@@ -579,7 +579,7 @@
           <div class="bg-surface-0 rounded-xl border border-surface-3 overflow-hidden">
             <div class="px-4 py-3 bg-surface-1 border-b border-surface-3 flex items-center justify-between">
               <h3 class="text-sm font-semibold text-ink-1">${seg.name} — ${segContacts.length} contacts</h3>
-              <button onclick="exportCSV(contacts.filter(presetSegments.find(s=>s.id===activeSegment)?.filter||(()=>true)), 'segment-${presetSegments.find(s=>s.id===activeSegment)?.name?.replace(/[^a-z]/gi,'-')||'export'}.csv')" class="text-xs text-brand-600 hover:text-brand-700 font-medium">📤 Export to CSV</button>
+              <button onclick="exportCSV(contacts.filter(presetSegments.find(s=>s.id===activeSegment)?.filter||(()=>true)), 'segment-export.csv')" class="text-xs text-brand-600 hover:text-brand-700 font-medium">📤 Export to CSV</button>
             </div>
             <table class="w-full text-sm">
               <thead><tr class="text-left text-xs text-ink-3 border-b border-surface-3"><th class="px-4 py-2">Contact</th><th class="px-4 py-2">Source</th><th class="px-4 py-2">Track</th><th class="px-4 py-2">Stage</th><th class="px-4 py-2">Geography</th></tr></thead>
@@ -1160,7 +1160,7 @@
             </div>
             <div class="divide-y divide-surface-2">
               ${events.map(ev => `
-                <div onclick="lumaLoadAttendees('${ev.apiId}','${ev.name.replace(/'/g,"\\'")}')" class="px-5 py-4 hover:bg-surface-1 cursor-pointer transition-colors">
+                <div onclick="lumaLoadAttendees(this.dataset.eventId,this.dataset.eventName)" data-event-id="${ev.apiId}" data-event-name="${ev.name}" class="px-5 py-4 hover:bg-surface-1 cursor-pointer transition-colors">
                   <div class="flex items-center justify-between">
                     <div class="flex items-center gap-3">
                       ${ev.coverUrl ? `<img src="${ev.coverUrl}" class="w-10 h-10 rounded-lg object-cover">` : `<div class="w-10 h-10 rounded-lg bg-brand-100 flex items-center justify-center text-brand-700">🎪</div>`}
