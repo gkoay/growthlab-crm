@@ -76,6 +76,7 @@
   let activeTrack = 'Self-serve';
   let activeSegment = null;
   let importState = { file:null, rows:[], headers:[], mapping:{}, step:1, duplicates:0, preview:[] };
+  let lumaState = { apiKey: localStorage.getItem('luma_api_key')||'', events:[], selectedEvent:null, attendees:[], loading:false, error:'', imported:0, syncLog:[] };
 
   // ========== HELPERS ==========
   const initials = name => name.split(' ').map(n=>n[0]).join('');
@@ -95,9 +96,9 @@
       {id:'pipeline',label:'Pipeline',icon:'🔄'},
       {id:'segments',label:'Segments',icon:'🎯'},
       {id:'import',label:'Import',icon:'📥'},
+      {id:'luma',label:'Luma Sync',icon:'🔗'},
     ];
     const future = [
-      {label:'Luma Sync',icon:'🔗',ver:'v1.1'},
       {label:'Behavioral Feed',icon:'📡',ver:'v1.1'},
       {label:'Automations',icon:'⚡',ver:'v2'},
       {label:'Reports',icon:'📈',ver:'v2'},
@@ -634,6 +635,299 @@
     `;
   }
 
+  // ========== LUMA CONNECTOR ==========
+  const LUMA_API = 'https://api.lu.ma';
+
+  async function lumaFetch(endpoint, params = {}) {
+    if (!lumaState.apiKey) throw new Error('API key required');
+    const url = new URL(LUMA_API + endpoint);
+    Object.entries(params).forEach(([k,v]) => url.searchParams.set(k, v));
+    const res = await fetch(url.toString(), {
+      headers: { 'x-luma-api-key': lumaState.apiKey, 'Content-Type': 'application/json' }
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `Luma API error: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async function lumaConnect() {
+    const key = document.getElementById('lumaApiKey')?.value?.trim();
+    if (!key) { lumaState.error = 'Please enter your Luma API key'; renderLuma(); return; }
+    lumaState.apiKey = key;
+    localStorage.setItem('luma_api_key', key);
+    lumaState.loading = true;
+    lumaState.error = '';
+    renderLuma();
+    try {
+      const data = await lumaFetch('/v1/calendar/get-events');
+      lumaState.events = (data.entries || data.events || []).map(e => ({
+        apiId: e.api_id || e.event?.api_id || e.id,
+        name: e.name || e.event?.name || 'Untitled Event',
+        description: e.description || e.event?.description || '',
+        startAt: e.start_at || e.event?.start_at || '',
+        endAt: e.end_at || e.event?.end_at || '',
+        url: e.url || e.event?.url || '',
+        geoAddress: e.geo_address || e.event?.geo_address || 'Online',
+        guestCount: e.guest_count || e.event?.guest_count || 0,
+        coverUrl: e.cover_url || e.event?.cover_url || ''
+      }));
+      lumaState.loading = false;
+      lumaState.syncLog.push({ time: new Date().toLocaleTimeString(), msg: `Connected — found ${lumaState.events.length} events` });
+    } catch(e) {
+      lumaState.loading = false;
+      lumaState.error = e.message;
+    }
+    renderLuma();
+  }
+
+  async function lumaLoadAttendees(eventApiId, eventName) {
+    lumaState.selectedEvent = eventName;
+    lumaState.loading = true;
+    lumaState.error = '';
+    lumaState.attendees = [];
+    renderLuma();
+    try {
+      let allGuests = [];
+      let cursor = null;
+      do {
+        const params = { event_api_id: eventApiId, limit: '100' };
+        if (cursor) params.cursor = cursor;
+        const data = await lumaFetch('/v1/event/get-guests', params);
+        const guests = data.guests || data.entries || [];
+        allGuests = allGuests.concat(guests);
+        cursor = data.next_cursor || null;
+      } while (cursor);
+
+      lumaState.attendees = allGuests.map(g => ({
+        name: g.name || [g.first_name, g.last_name].filter(Boolean).join(' ') || 'Unknown',
+        email: g.email || '',
+        registeredAt: g.registered_at || g.created_at || '',
+        approvedAt: g.approved_at || '',
+        checkedIn: g.checked_in || false,
+        eventName: eventName
+      })).filter(g => g.email); // Must have email
+
+      lumaState.loading = false;
+      lumaState.syncLog.push({ time: new Date().toLocaleTimeString(), msg: `Loaded ${lumaState.attendees.length} attendees from "${eventName}"` });
+    } catch(e) {
+      lumaState.loading = false;
+      lumaState.error = e.message;
+    }
+    renderLuma();
+  }
+
+  function lumaImportAttendees() {
+    const existingEmails = new Set(contacts.map(c => c.email.toLowerCase()));
+    let imported = 0, skipped = 0;
+
+    lumaState.attendees.forEach(a => {
+      if (existingEmails.has(a.email.toLowerCase())) { skipped++; return; }
+
+      const isRegistered = !!a.approvedAt;
+      const isCheckedIn = a.checkedIn;
+      let stage = 'Registered';
+      if (isCheckedIn) stage = 'Attended';
+      else if (!isRegistered) stage = 'Lead';
+
+      const contact = {
+        id: 'luma_' + Date.now() + '_' + imported,
+        name: a.name,
+        email: a.email,
+        source: 'Event/Workshop',
+        persona: 'Founder',
+        track: 'Events',
+        lifecycleStage: stage,
+        geography: '',
+        company: '',
+        createdDate: a.registeredAt ? new Date(a.registeredAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        lastActivityDate: a.approvedAt ? new Date(a.approvedAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        notes: `Imported from Luma: ${a.eventName}`,
+        activities: [
+          { date: new Date().toISOString().split('T')[0], type: 'import', desc: `Imported from Luma event: ${a.eventName}` },
+          { date: a.registeredAt ? new Date(a.registeredAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0], type: 'event', desc: `Registered for: ${a.eventName}` }
+        ]
+      };
+
+      if (isCheckedIn) {
+        contact.activities.push({ date: a.approvedAt ? new Date(a.approvedAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0], type: 'stage', desc: 'Registered → Attended (checked in via Luma)' });
+      }
+
+      contacts.push(contact);
+      existingEmails.add(a.email.toLowerCase());
+      imported++;
+    });
+
+    lumaState.imported += imported;
+    lumaState.syncLog.push({ time: new Date().toLocaleTimeString(), msg: `Imported ${imported} contacts (${skipped} duplicates skipped)` });
+    lumaState.selectedEvent = null;
+    lumaState.attendees = [];
+    renderLuma();
+    renderSidebar();
+  }
+
+  function lumaDisconnect() {
+    lumaState = { apiKey:'', events:[], selectedEvent:null, attendees:[], loading:false, error:'', imported:0, syncLog:[] };
+    localStorage.removeItem('luma_api_key');
+    renderLuma();
+  }
+
+  function renderLuma() {
+    const { apiKey, events, selectedEvent, attendees, loading, error, imported, syncLog } = lumaState;
+
+    document.getElementById('main').innerHTML = `
+      <div class="p-8 fade-in">
+        <div class="mb-6">
+          <h1 class="text-2xl font-bold text-ink-1">Luma Sync</h1>
+          <p class="text-sm text-ink-3 mt-1">Connect your Luma account to auto-import event attendees</p>
+        </div>
+
+        ${error ? `<div class="bg-red-50 border border-red-200 rounded-xl p-4 mb-6"><p class="text-sm text-red-700">❌ ${error}</p></div>` : ''}
+
+        <!-- Connection Card -->
+        <div class="bg-surface-0 rounded-xl border border-surface-3 p-6 mb-6">
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-[#ff6b6b] flex items-center justify-center text-white text-lg">🎪</div>
+              <div>
+                <h3 class="text-sm font-semibold text-ink-1">Luma API Connection</h3>
+                <p class="text-xs text-ink-3">${apiKey ? '✅ Connected' : 'Not connected'}</p>
+              </div>
+            </div>
+            ${apiKey ? `<button onclick="lumaDisconnect()" class="text-sm text-red-500 hover:text-red-700">Disconnect</button>` : ''}
+          </div>
+          ${!apiKey ? `
+            <div class="mt-4">
+              <label class="text-xs font-medium text-ink-2 block mb-1">Luma API Key</label>
+              <p class="text-xs text-ink-4 mb-3">Find your API key at <a href="https://lu.ma/settings" target="_blank" class="text-brand-600 underline">lu.ma/settings</a> → API section</p>
+              <div class="flex gap-2">
+                <input type="password" id="lumaApiKey" placeholder="Enter your Luma API key..." class="flex-1 px-3 py-2 text-sm border border-surface-3 rounded-lg bg-surface-1 focus:outline-none focus:ring-2 focus:ring-brand-500">
+                <button onclick="lumaConnect()" class="px-6 py-2 text-sm bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700" ${loading?'disabled':''}>${loading?'Connecting...':'Connect'}</button>
+              </div>
+            </div>
+          ` : `
+            <div class="grid grid-cols-3 gap-4 mt-4">
+              <div class="bg-surface-1 rounded-lg p-3 text-center">
+                <div class="text-xl font-bold text-ink-1">${events.length}</div>
+                <div class="text-xs text-ink-3">Events Found</div>
+              </div>
+              <div class="bg-surface-1 rounded-lg p-3 text-center">
+                <div class="text-xl font-bold text-brand-600">${imported}</div>
+                <div class="text-xs text-ink-3">Contacts Imported</div>
+              </div>
+              <div class="bg-surface-1 rounded-lg p-3 text-center">
+                <div class="text-xl font-bold text-ink-1">${syncLog.length}</div>
+                <div class="text-xs text-ink-3">Sync Actions</div>
+              </div>
+            </div>
+          `}
+        </div>
+
+        ${apiKey && events.length > 0 ? `
+          <!-- Events List -->
+          <div class="bg-surface-0 rounded-xl border border-surface-3 overflow-hidden mb-6">
+            <div class="px-5 py-4 bg-surface-1 border-b border-surface-3">
+              <h3 class="text-sm font-semibold text-ink-1">Your Luma Events</h3>
+              <p class="text-xs text-ink-3">Click an event to load attendees</p>
+            </div>
+            <div class="divide-y divide-surface-2">
+              ${events.map(ev => `
+                <div onclick="lumaLoadAttendees('${ev.apiId}','${ev.name.replace(/'/g,"\\'")}')" class="px-5 py-4 hover:bg-surface-1 cursor-pointer transition-colors">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                      ${ev.coverUrl ? `<img src="${ev.coverUrl}" class="w-10 h-10 rounded-lg object-cover">` : `<div class="w-10 h-10 rounded-lg bg-brand-100 flex items-center justify-center text-brand-700">🎪</div>`}
+                      <div>
+                        <div class="text-sm font-medium text-ink-1">${ev.name}</div>
+                        <div class="text-xs text-ink-3">${ev.geoAddress || 'Online'} · ${ev.startAt ? new Date(ev.startAt).toLocaleDateString() : 'TBD'}</div>
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-3">
+                      <span class="text-xs text-ink-3">${ev.guestCount} guests</span>
+                      <span class="text-brand-600 text-sm">→</span>
+                    </div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+
+          <button onclick="lumaConnect()" class="text-sm text-brand-600 hover:text-brand-700 font-medium">🔄 Refresh events</button>
+        ` : ''}
+
+        ${selectedEvent && attendees.length > 0 ? `
+          <!-- Attendees Preview -->
+          <div class="bg-surface-0 rounded-xl border border-surface-3 overflow-hidden mb-6">
+            <div class="px-5 py-4 bg-surface-1 border-b border-surface-3 flex items-center justify-between">
+              <div>
+                <h3 class="text-sm font-semibold text-ink-1">Attendees: ${selectedEvent}</h3>
+                <p class="text-xs text-ink-3">${attendees.length} attendees found</p>
+              </div>
+              <button onclick="lumaImportAttendees()" class="px-5 py-2 text-sm bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700">
+                📥 Import ${attendees.length} Contacts
+              </button>
+            </div>
+            <div class="max-h-80 overflow-y-auto">
+              <table class="w-full text-sm">
+                <thead class="sticky top-0 bg-surface-1"><tr class="text-left text-xs text-ink-3 border-b border-surface-3">
+                  <th class="px-4 py-2">Name</th><th class="px-4 py-2">Email</th><th class="px-4 py-2">Status</th><th class="px-4 py-2">Registered</th>
+                </tr></thead>
+                <tbody>
+                  ${attendees.slice(0,50).map(a => `
+                    <tr class="border-b border-surface-2">
+                      <td class="px-4 py-2 font-medium text-ink-1">${a.name}</td>
+                      <td class="px-4 py-2 text-ink-3">${a.email}</td>
+                      <td class="px-4 py-2">
+                        ${a.checkedIn ? '<span class="text-xs px-2 py-0.5 rounded-full bg-brand-100 text-brand-700">✓ Checked in</span>' : '<span class="text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700">Registered</span>'}
+                      </td>
+                      <td class="px-4 py-2 text-xs text-ink-3">${a.registeredAt ? new Date(a.registeredAt).toLocaleDateString() : '—'}</td>
+                    </tr>
+                  `).join('')}
+                  ${attendees.length > 50 ? `<tr><td colspan="4" class="px-4 py-2 text-center text-xs text-ink-4">... and ${attendees.length-50} more</td></tr>` : ''}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ` : selectedEvent && !loading ? `<div class="bg-surface-0 rounded-xl border border-surface-3 p-8 text-center mb-6"><p class="text-ink-3">No attendees found for this event</p></div>` : ''}
+
+        ${loading ? `<div class="text-center py-8"><div class="text-2xl mb-2">⏳</div><p class="text-sm text-ink-3">Loading from Luma...</p></div>` : ''}
+
+        <!-- Sync Log -->
+        ${syncLog.length > 0 ? `
+          <div class="bg-surface-0 rounded-xl border border-surface-3 p-5">
+            <h3 class="text-sm font-semibold text-ink-1 mb-3">Sync Log</h3>
+            <div class="space-y-2 max-h-40 overflow-y-auto">
+              ${syncLog.slice().reverse().map(l => `
+                <div class="flex items-center gap-2 text-xs">
+                  <span class="text-ink-4">${l.time}</span>
+                  <span class="text-ink-2">${l.msg}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+
+        <!-- API Info -->
+        <div class="mt-6 bg-blue-50 border border-blue-200 rounded-xl p-4">
+          <div class="flex items-start gap-3">
+            <span class="text-lg">💡</span>
+            <div>
+              <h4 class="text-sm font-semibold text-blue-900">How Luma Sync Works</h4>
+              <ul class="text-xs text-blue-700 mt-1 space-y-1">
+                <li>• Connect your Luma account with an API key</li>
+                <li>• View all your events and their guest lists</li>
+                <li>• Click any event to load attendees</li>
+                <li>• Import attendees as CRM contacts (with deduplication)</li>
+                <li>• Checked-in guests → "Attended" stage automatically</li>
+                <li>• Registered-only guests → "Registered" stage</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   // ========== NAVIGATION ==========
   function navigate(page) {
     currentPage = page;
@@ -643,6 +937,7 @@
     else if (page === 'pipeline') renderPipeline();
     else if (page === 'segments') renderSegments();
     else if (page === 'import') renderImport();
+    else if (page === 'luma') renderLuma();
   }
 
   // ========== INIT ==========
