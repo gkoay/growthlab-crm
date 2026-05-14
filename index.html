@@ -77,6 +77,8 @@
   let activeSegment = null;
   let importState = { file:null, rows:[], headers:[], mapping:{}, step:1, duplicates:0, preview:[] };
   let lumaState = { apiKey: localStorage.getItem('luma_api_key')||'', events:[], selectedEvent:null, attendees:[], loading:false, error:'', imported:0, syncLog:[] };
+  let modalMode = ''; // 'addContact', 'addNote', 'changeStage', 'createSegment'
+  let modalData = {};
 
   // ========== HELPERS ==========
   const initials = name => name.split(' ').map(n=>n[0]).join('');
@@ -86,6 +88,235 @@
     const m = {'Pro customer':'bg-brand-600 text-white','PQL':'bg-purple-100 text-purple-700','Qualified':'bg-brand-600 text-white','Activated':'bg-brand-100 text-brand-700','Re-engaged':'bg-brand-100 text-brand-700','In conversation':'bg-blue-100 text-blue-700','Attended':'bg-orange-100 text-orange-700','Registered':'bg-yellow-100 text-yellow-700','Signed up':'bg-blue-100 text-blue-700','Lead':'bg-gray-100 text-gray-600'};
     return m[s]||'bg-gray-100 text-gray-600';
   };
+  const activityIcon = t => ({stage:'🔄',note:'📝',event:'🎪',import:'📥',login:'🔑'})[t]||'📌';
+  const today = () => new Date().toISOString().split('T')[0];
+
+  // ========== EXPORT CSV ==========
+  function exportCSV(data, filename) {
+    const headers = ['name','email','company','source','persona','track','lifecycleStage','geography','createdDate','lastActivityDate','notes'];
+    const rows = data.map(c => headers.map(h => `"${String(c[h]||'').replace(/"/g,'""')}"`).join(','));
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename || 'contacts.csv'; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ========== ADD CONTACT ==========
+  function showAddContact() {
+    modalMode = 'addContact';
+    modalData = { name:'', email:'', company:'', source:'Manual', persona:'Founder', track:'Self-serve', lifecycleStage:'Lead', geography:'', notes:'' };
+    renderModal();
+  }
+
+  function saveNewContact() {
+    const d = modalData;
+    if (!d.name?.trim() || !d.email?.trim()) { alert('Name and Email are required'); return; }
+    if (contacts.find(c => c.email.toLowerCase() === d.email.toLowerCase())) { alert('A contact with this email already exists'); return; }
+    contacts.push({
+      id: 'new_' + Date.now(),
+      name: d.name.trim(),
+      email: d.email.trim(),
+      company: d.company?.trim() || '',
+      source: d.source || 'Manual',
+      persona: d.persona || 'Founder',
+      track: d.track || 'Self-serve',
+      lifecycleStage: d.lifecycleStage || 'Lead',
+      geography: d.geography?.trim() || '',
+      createdDate: today(),
+      lastActivityDate: today(),
+      notes: d.notes?.trim() || '',
+      activities: [{ date: today(), type: 'import', desc: 'Added manually' }]
+    });
+    closeModal();
+    renderContacts();
+  }
+
+  // ========== CHANGE STAGE ==========
+  function showChangeStage(contactId) {
+    const contact = contacts.find(c => c.id === contactId);
+    if (!contact) return;
+    const stagesByTrack = {
+      'Self-serve': ['Lead','Signed up','Activated','PQL','Pro customer'],
+      'Events': ['Lead','Registered','Attended','Re-engaged'],
+      'Enterprise': ['Lead','In conversation','Qualified']
+    };
+    modalMode = 'changeStage';
+    modalData = { contactId, currentStage: contact.lifecycleStage, stages: stagesByTrack[contact.track] || [], contactName: contact.name };
+    renderModal();
+  }
+
+  function saveStageChange() {
+    const { contactId, newStage } = modalData;
+    const contact = contacts.find(c => c.id === contactId);
+    if (!contact || !newStage) return;
+    const oldStage = contact.lifecycleStage;
+    contact.lifecycleStage = newStage;
+    contact.lastActivityDate = today();
+    contact.activities.push({ date: today(), type: 'stage', desc: `${oldStage} → ${newStage}` });
+    closeModal();
+    showContact(contactId);
+  }
+
+  // ========== ADD NOTE ==========
+  function showAddNote(contactId) {
+    modalMode = 'addNote';
+    modalData = { contactId, note: '' };
+    renderModal();
+  }
+
+  function saveNote() {
+    const { contactId, note } = modalData;
+    if (!note?.trim()) return;
+    const contact = contacts.find(c => c.id === contactId);
+    if (!contact) return;
+    contact.notes = contact.notes ? contact.notes + '\n' + note.trim() : note.trim();
+    contact.lastActivityDate = today();
+    contact.activities.push({ date: today(), type: 'note', desc: note.trim() });
+    closeModal();
+    showContact(contactId);
+  }
+
+  // ========== CREATE SEGMENT ==========
+  function showCreateSegment() {
+    modalMode = 'createSegment';
+    modalData = { name:'', description:'', persona:'', source:'', track:'', geography:'' };
+    renderModal();
+  }
+
+  function saveSegment() {
+    const d = modalData;
+    if (!d.name?.trim()) { alert('Segment name is required'); return; }
+    const filterFn = c => {
+      if (d.persona && c.persona !== d.persona) return false;
+      if (d.source && c.source !== d.source) return false;
+      if (d.track && c.track !== d.track) return false;
+      if (d.geography && c.geography !== d.geography) return false;
+      return true;
+    };
+    presetSegments.push({
+      id: 'custom_' + Date.now(),
+      name: d.name.trim(),
+      description: d.description?.trim() || '',
+      filter: filterFn
+    });
+    closeModal();
+    renderSegments();
+  }
+
+  // ========== MODAL RENDER ==========
+  function renderModal() {
+    let content = '';
+    const sources = ['Event/Workshop','Content download','Social referral','App signup','Newsletter','Inbound Enterprise','Manual'];
+    const personas = ['Founder','Student','Investor','Organization'];
+    const tracks = ['Self-serve','Events','Enterprise'];
+
+    const field = (label, key, type='text', opts=[]) => {
+      if (type === 'select') {
+        return `<div><label class="text-xs font-medium text-ink-2 block mb-1">${label}</label><select onchange="modalData.${key}=this.value" class="w-full px-3 py-2 text-sm border border-surface-3 rounded-lg bg-surface-1 focus:outline-none focus:ring-2 focus:ring-brand-500">${opts.map(o=>`<option value="${o}" ${modalData[key]===o?'selected':''}>${o}</option>`).join('')}</select></div>`;
+      }
+      if (type === 'textarea') {
+        return `<div><label class="text-xs font-medium text-ink-2 block mb-1">${label}</label><textarea oninput="modalData.${key}=this.value" rows="3" class="w-full px-3 py-2 text-sm border border-surface-3 rounded-lg bg-surface-1 focus:outline-none focus:ring-2 focus:ring-brand-500">${modalData[key]||''}</textarea></div>`;
+      }
+      return `<div><label class="text-xs font-medium text-ink-2 block mb-1">${label}</label><input type="${type}" value="${modalData[key]||''}" oninput="modalData.${key}=this.value" class="w-full px-3 py-2 text-sm border border-surface-3 rounded-lg bg-surface-1 focus:outline-none focus:ring-2 focus:ring-brand-500"></div>`;
+    };
+
+    if (modalMode === 'addContact') {
+      content = `
+        <div class="p-6 border-b border-surface-3 flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-ink-1">Add Contact</h2>
+          <button onclick="closeModal()" class="text-ink-3 hover:text-ink-1 text-xl">✕</button>
+        </div>
+        <div class="p-6 space-y-4">
+          <div class="grid grid-cols-2 gap-4">
+            ${field('Name *','name')}
+            ${field('Email *','email','email')}
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            ${field('Company','company')}
+            ${field('Geography','geography')}
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            ${field('Source','source','select',sources)}
+            ${field('Persona','persona','select',personas)}
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            ${field('Track','track','select',tracks)}
+            <div></div>
+          </div>
+          ${field('Notes','notes','textarea')}
+        </div>
+        <div class="p-6 border-t border-surface-3 flex justify-end gap-3">
+          <button onclick="closeModal()" class="px-4 py-2 text-sm border border-surface-3 rounded-lg text-ink-2 hover:bg-surface-2">Cancel</button>
+          <button onclick="saveNewContact()" class="px-6 py-2 text-sm bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700">Save Contact</button>
+        </div>
+      `;
+    } else if (modalMode === 'changeStage') {
+      content = `
+        <div class="p-6 border-b border-surface-3 flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-ink-1">Change Stage — ${modalData.contactName}</h2>
+          <button onclick="closeModal()" class="text-ink-3 hover:text-ink-1 text-xl">✕</button>
+        </div>
+        <div class="p-6">
+          <p class="text-xs text-ink-3 mb-4">Current: <span class="font-medium text-ink-1">${modalData.currentStage}</span></p>
+          <div class="space-y-2">
+            ${modalData.stages.map(s => `
+              <button onclick="modalData.newStage='${s}';saveStageChange()" class="w-full text-left px-4 py-3 rounded-lg border transition-colors ${s===modalData.currentStage?'border-brand-500 bg-brand-50':'border-surface-3 hover:border-brand-300 hover:bg-surface-1'}">
+                <div class="flex items-center justify-between">
+                  <span class="text-sm font-medium text-ink-1">${s}</span>
+                  ${s===modalData.currentStage?'<span class="text-xs text-brand-600">Current</span>':''}
+                </div>
+              </button>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    } else if (modalMode === 'addNote') {
+      content = `
+        <div class="p-6 border-b border-surface-3 flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-ink-1">Add Note</h2>
+          <button onclick="closeModal()" class="text-ink-3 hover:text-ink-1 text-xl">✕</button>
+        </div>
+        <div class="p-6">
+          <textarea oninput="modalData.note=this.value" rows="4" placeholder="Write your note here..." class="w-full px-3 py-2 text-sm border border-surface-3 rounded-lg bg-surface-1 focus:outline-none focus:ring-2 focus:ring-brand-500"></textarea>
+        </div>
+        <div class="p-6 border-t border-surface-3 flex justify-end gap-3">
+          <button onclick="closeModal()" class="px-4 py-2 text-sm border border-surface-3 rounded-lg text-ink-2 hover:bg-surface-2">Cancel</button>
+          <button onclick="saveNote()" class="px-6 py-2 text-sm bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700">Save Note</button>
+        </div>
+      `;
+    } else if (modalMode === 'createSegment') {
+      content = `
+        <div class="p-6 border-b border-surface-3 flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-ink-1">Create Segment</h2>
+          <button onclick="closeModal()" class="text-ink-3 hover:text-ink-1 text-xl">✕</button>
+        </div>
+        <div class="p-6 space-y-4">
+          ${field('Segment Name *','name')}
+          ${field('Description','description')}
+          <div class="grid grid-cols-2 gap-4">
+            ${field('Filter by Persona','persona','select',['',...personas])}
+            ${field('Filter by Source','source','select',['',...sources])}
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            ${field('Filter by Track','track','select',['',...tracks])}
+            ${field('Filter by Geography','geography')}
+          </div>
+          <p class="text-xs text-ink-4">Leave filters empty to include all contacts</p>
+        </div>
+        <div class="p-6 border-t border-surface-3 flex justify-end gap-3">
+          <button onclick="closeModal()" class="px-4 py-2 text-sm border border-surface-3 rounded-lg text-ink-2 hover:bg-surface-2">Cancel</button>
+          <button onclick="saveSegment()" class="px-6 py-2 text-sm bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700">Create Segment</button>
+        </div>
+      `;
+    }
+
+    document.getElementById('modal-content').innerHTML = content;
+    document.getElementById('modal').classList.remove('hidden');
+  }
+
+  // ========== MODAL RENDER ==========
   const activityIcon = t => ({stage:'🔄',note:'📝',event:'🎪',import:'📥',login:'🔑'})[t]||'📌';
 
   // ========== RENDER SIDEBAR ==========
@@ -206,8 +437,8 @@
         <div class="flex items-center justify-between mb-6">
           <div><h1 class="text-2xl font-bold text-ink-1">Contacts</h1><p class="text-sm text-ink-3 mt-1">${filtered.length} of ${contacts.length} contacts</p></div>
           <div class="flex gap-2">
-            <button class="px-4 py-2 text-sm bg-white border border-surface-3 rounded-lg text-ink-2 hover:bg-surface-2 transition-colors">📤 Export CSV</button>
-            <button class="px-4 py-2 text-sm bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">+ Add Contact</button>
+            <button onclick="exportCSV(contacts.length===filtered.length?contacts:filtered, 'growthlab-contacts.csv')" class="px-4 py-2 text-sm bg-white border border-surface-3 rounded-lg text-ink-2 hover:bg-surface-2 transition-colors">📤 Export CSV</button>
+            <button onclick="showAddContact()" class="px-4 py-2 text-sm bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">+ Add Contact</button>
           </div>
         </div>
         <div class="bg-surface-0 rounded-xl border border-surface-3 p-4 mb-6">
@@ -292,7 +523,7 @@
       <div class="p-8 fade-in">
         <div class="flex items-center justify-between mb-6">
           <div><h1 class="text-2xl font-bold text-ink-1">Segments</h1><p class="text-sm text-ink-3 mt-1">Pre-built segments for common GrowthLab queries</p></div>
-          <button class="px-4 py-2 text-sm bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">+ Create Segment</button>
+          <button onclick="showCreateSegment()" class="px-4 py-2 text-sm bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">+ Create Segment</button>
         </div>
         <div class="grid grid-cols-3 gap-4 mb-6">
           ${presetSegments.map(s=>{
@@ -307,7 +538,7 @@
           <div class="bg-surface-0 rounded-xl border border-surface-3 overflow-hidden">
             <div class="px-4 py-3 bg-surface-1 border-b border-surface-3 flex items-center justify-between">
               <h3 class="text-sm font-semibold text-ink-1">${seg.name} — ${segContacts.length} contacts</h3>
-              <button class="text-xs text-brand-600 hover:text-brand-700 font-medium">📤 Export to CSV</button>
+              <button onclick="exportCSV(contacts.filter(presetSegments.find(s=>s.id===activeSegment)?.filter||(()=>true)), 'segment-${presetSegments.find(s=>s.id===activeSegment)?.name?.replace(/[^a-z]/gi,'-')||'export'}.csv')" class="text-xs text-brand-600 hover:text-brand-700 font-medium">📤 Export to CSV</button>
             </div>
             <table class="w-full text-sm">
               <thead><tr class="text-left text-xs text-ink-3 border-b border-surface-3"><th class="px-4 py-2">Contact</th><th class="px-4 py-2">Source</th><th class="px-4 py-2">Track</th><th class="px-4 py-2">Stage</th><th class="px-4 py-2">Geography</th></tr></thead>
@@ -347,10 +578,15 @@
           <span class="px-3 py-1 rounded-full text-xs font-medium bg-surface-2 text-ink-2">${c.source}</span>
           <span class="px-3 py-1 rounded-full text-xs font-medium bg-surface-2 text-ink-2">${c.persona}</span>
           <span class="px-3 py-1 rounded-full text-xs font-medium bg-surface-2 text-ink-2">${c.track}</span>
-          <span class="px-3 py-1 rounded-full text-xs font-medium ${stageBadge(c.lifecycleStage)}">${c.lifecycleStage}</span>
+          <button onclick="showChangeStage('${c.id}')" class="px-3 py-1 rounded-full text-xs font-medium ${stageBadge(c.lifecycleStage)} cursor-pointer hover:opacity-80 transition-opacity" title="Click to change stage">${c.lifecycleStage} ✏️</button>
         </div>
       </div>
-      ${c.notes?`<div class="p-6 border-b border-surface-3"><h3 class="text-xs font-semibold text-ink-3 uppercase tracking-wide mb-2">Notes</h3><p class="text-sm text-ink-2">${c.notes}</p></div>`:''}
+      <!-- Action Buttons -->
+      <div class="px-6 py-3 border-b border-surface-3 flex gap-2">
+        <button onclick="showChangeStage('${c.id}')" class="px-3 py-1.5 text-xs bg-brand-50 text-brand-700 rounded-lg hover:bg-brand-100 transition-colors font-medium">🔄 Change Stage</button>
+        <button onclick="showAddNote('${c.id}')" class="px-3 py-1.5 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors font-medium">📝 Add Note</button>
+      </div>
+      ${c.notes?`<div class="p-6 border-b border-surface-3"><h3 class="text-xs font-semibold text-ink-3 uppercase tracking-wide mb-2">Notes</h3><p class="text-sm text-ink-2 whitespace-pre-wrap">${c.notes}</p></div>`:''}
       <div class="p-6">
         <h3 class="text-xs font-semibold text-ink-3 uppercase tracking-wide mb-3">Activity Log</h3>
         <div class="space-y-3">
