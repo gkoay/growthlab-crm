@@ -76,7 +76,48 @@
   let activeTrack = 'Self-serve';
   let activeSegment = null;
   let importState = { file:null, rows:[], headers:[], mapping:{}, step:1, duplicates:0, preview:[] };
-  let lumaState = { apiKey: localStorage.getItem('luma_api_key')||'', events:[], selectedEvent:null, attendees:[], loading:false, error:'', imported:0, syncLog:[] };
+  let lumaState = { apiKey: localStorage.getItem('luma_api_key')||'', events:[], selectedEvent:null, attendees:[], loading:false, error:'', imported:0, syncLog:[], demoMode:true };
+
+  // Mock Luma data for demo
+  const mockLumaEvents = [
+    { apiId:'evt_001', name:'Founder-Investor Mixer SG', description:'Monthly networking event connecting founders with angel investors', startAt:daysAgo(14)+'T18:30:00Z', endAt:daysAgo(14)+'T21:00:00Z', url:'https://lu.ma/gl-mixer-may', geoAddress:'Singapore', guestCount:87, coverUrl:'' },
+    { apiId:'evt_002', name:'GrowthLab Pitch Night', description:'Early-stage startups pitch to a panel of investors', startAt:daysAgo(7)+'T19:00:00Z', endAt:daysAgo(7)+'T21:30:00Z', url:'https://lu.ma/gl-pitch-may', geoAddress:'Singapore', guestCount:124, coverUrl:'' },
+    { apiId:'evt_003', name:'Student Founders Workshop', description:'Hands-on workshop for student entrepreneurs building MVPs', startAt:daysAgo(3)+'T14:00:00Z', endAt:daysAgo(3)+'T17:00:00Z', url:'https://lu.ma/gl-student-ws', geoAddress:'Online', guestCount:56, coverUrl:'' },
+    { apiId:'evt_004', name:'Enterprise SaaS Roundtable', description:'Discussion on scaling B2B SaaS in Southeast Asia', startAt:daysAgo(1)+'T10:00:00Z', endAt:daysAgo(1)+'T12:00:00Z', url:'https://lu.ma/gl-enterprise', geoAddress:'Singapore', guestCount:32, coverUrl:'' },
+    { apiId:'evt_005', name:'GrowthLab x India: Virtual Meetup', description:'Connecting Indian founders with the GrowthLab ecosystem', startAt:daysAgo(21)+'T09:00:00Z', endAt:daysAgo(21)+'T10:30:00Z', url:'https://lu.ma/gl-india', geoAddress:'Online', guestCount:68, coverUrl:'' },
+  ];
+
+  const mockLumaAttendees = {
+    'evt_001': [
+      { name:'Tan Wei Lin', email:'twl@angel.sg', registered_at:daysAgo(20)+'T10:00:00Z', approved_at:daysAgo(18)+'T10:00:00Z', checked_in:true },
+      { name:'Ravi Shankar', email:'ravi@seedfund.in', registered_at:daysAgo(19)+'T14:30:00Z', approved_at:daysAgo(18)+'T10:00:00Z', checked_in:true },
+      { name:'Michelle Ong', email:'michelle@designco.sg', registered_at:daysAgo(17)+'T09:00:00Z', approved_at:daysAgo(16)+'T10:00:00Z', checked_in:false },
+      { name:'Park Jae-sung', email:'js.park@koreanvc.kr', registered_at:daysAgo(16)+'T11:00:00Z', approved_at:daysAgo(15)+'T10:00:00Z', checked_in:true },
+      { name:'Aisha Bello', email:'aisha.b@naija.ng', registered_at:daysAgo(15)+'T08:00:00Z', approved_at:daysAgo(14)+'T10:00:00Z', checked_in:false },
+    ],
+    'evt_002': [
+      { name:'Chen Jia Wei', email:'jw.chen@sgventures.com', registered_at:daysAgo(12)+'T10:00:00Z', approved_at:daysAgo(10)+'T10:00:00Z', checked_in:true },
+      { name:'Priya Menon', email:'priya.m@edtech.in', registered_at:daysAgo(11)+'T15:00:00Z', approved_at:daysAgo(10)+'T10:00:00Z', checked_in:true },
+      { name:'David Tan', email:'david@greenventures.sg', registered_at:daysAgo(10)+'T09:00:00Z', approved_at:daysAgo(9)+'T10:00:00Z', checked_in:true },
+      { name:'Sakura Yamamoto', email:'sakura@jpstartup.jp', registered_at:daysAgo(9)+'T12:00:00Z', approved_at:daysAgo(8)+'T10:00:00Z', checked_in:false },
+      { name:'Lim Zheng Wei', email:'zw.lim@fintech.sg', registered_at:daysAgo(8)+'T10:00:00Z', approved_at:daysAgo(7)+'T10:00:00Z', checked_in:true },
+      { name:'Ananya Gupta', email:'ananya@healthtech.in', registered_at:daysAgo(7)+'T14:00:00Z', approved_at:daysAgo(7)+'T10:00:00Z', checked_in:true },
+    ],
+    'evt_003': [
+      { name:'NUS Computing Club', email:'computing@nus.edu.sg', registered_at:daysAgo(5)+'T10:00:00Z', approved_at:daysAgo(4)+'T10:00:00Z', checked_in:true },
+      { name:'SMU Entrepreneurship', email:'entrepreneur@smu.edu.sg', registered_at:daysAgo(4)+'T11:00:00Z', approved_at:daysAgo(3)+'T10:00:00Z', checked_in:true },
+      { name:'Ryan Chua', email:'ryan.chua.2024@nus.edu.sg', registered_at:daysAgo(4)+'T16:00:00Z', approved_at:daysAgo(3)+'T10:00:00Z', checked_in:true },
+    ],
+    'evt_004': [
+      { name:'BigCorp Innovation', email:'innovation@bigcorp.sg', registered_at:daysAgo(3)+'T10:00:00Z', approved_at:daysAgo(2)+'T10:00:00Z', checked_in:true },
+      { name:'Teo & Partners', email:'events@teopartners.com', registered_at:daysAgo(2)+'T09:00:00Z', approved_at:daysAgo(1)+'T10:00:00Z', checked_in:true },
+    ],
+    'evt_005': [
+      { name:'Arjun Reddy', email:'arjun@bangalorestartups.in', registered_at:daysAgo(25)+'T10:00:00Z', approved_at:daysAgo(23)+'T10:00:00Z', checked_in:true },
+      { name:'Sneha Iyer', email:'sneha@techmumbai.in', registered_at:daysAgo(24)+'T14:00:00Z', approved_at:daysAgo(23)+'T10:00:00Z', checked_in:true },
+      { name:'Vikram Singh', email:'vikram@delhistartups.in', registered_at:daysAgo(22)+'T10:00:00Z', approved_at:daysAgo(21)+'T10:00:00Z', checked_in:false },
+    ],
+  };
   let modalMode = ''; // 'addContact', 'addNote', 'changeStage', 'createSegment'
   let modalData = {};
 
@@ -889,13 +930,24 @@
   }
 
   async function lumaConnect() {
-    const key = document.getElementById('lumaApiKey')?.value?.trim();
-    if (!key) { lumaState.error = 'Please enter your Luma API key'; renderLuma(); return; }
-    lumaState.apiKey = key;
-    localStorage.setItem('luma_api_key', key);
     lumaState.loading = true;
     lumaState.error = '';
     renderLuma();
+
+    if (lumaState.demoMode) {
+      // Demo mode: use mock data
+      await new Promise(r => setTimeout(r, 800)); // Simulate loading
+      lumaState.events = mockLumaEvents;
+      lumaState.loading = false;
+      lumaState.syncLog.push({ time: new Date().toLocaleTimeString(), msg: `[Demo] Connected — found ${lumaState.events.length} events` });
+      renderLuma();
+      return;
+    }
+
+    const key = document.getElementById('lumaApiKey')?.value?.trim();
+    if (!key) { lumaState.error = 'Please enter your Luma API key'; lumaState.loading = false; renderLuma(); return; }
+    lumaState.apiKey = key;
+    localStorage.setItem('luma_api_key', key);
     try {
       const data = await lumaFetch('/v1/calendar/get-events');
       lumaState.events = (data.entries || data.events || []).map(e => ({
@@ -924,6 +976,24 @@
     lumaState.error = '';
     lumaState.attendees = [];
     renderLuma();
+
+    if (lumaState.demoMode) {
+      await new Promise(r => setTimeout(r, 600));
+      const guests = mockLumaAttendees[eventApiId] || [];
+      lumaState.attendees = guests.map(g => ({
+        name: g.name,
+        email: g.email,
+        registeredAt: g.registered_at,
+        approvedAt: g.approved_at,
+        checkedIn: g.checked_in,
+        eventName: eventName
+      })).filter(g => g.email);
+      lumaState.loading = false;
+      lumaState.syncLog.push({ time: new Date().toLocaleTimeString(), msg: `[Demo] Loaded ${lumaState.attendees.length} attendees from "${eventName}"` });
+      renderLuma();
+      return;
+    }
+
     try {
       let allGuests = [];
       let cursor = null;
@@ -943,7 +1013,7 @@
         approvedAt: g.approved_at || '',
         checkedIn: g.checked_in || false,
         eventName: eventName
-      })).filter(g => g.email); // Must have email
+      })).filter(g => g.email);
 
       lumaState.loading = false;
       lumaState.syncLog.push({ time: new Date().toLocaleTimeString(), msg: `Loaded ${lumaState.attendees.length} attendees from "${eventName}"` });
@@ -1011,6 +1081,8 @@
 
   function renderLuma() {
     const { apiKey, events, selectedEvent, attendees, loading, error, imported, syncLog } = lumaState;
+    // Auto-load demo data on first visit
+    if (lumaState.demoMode && events.length === 0 && !loading) { lumaConnect(); return; }
 
     document.getElementById('main').innerHTML = `
       <div class="p-8 fade-in">
@@ -1028,12 +1100,30 @@
               <div class="w-10 h-10 rounded-lg bg-[#ff6b6b] flex items-center justify-center text-white text-lg">🎪</div>
               <div>
                 <h3 class="text-sm font-semibold text-ink-1">Luma API Connection</h3>
-                <p class="text-xs text-ink-3">${apiKey ? '✅ Connected' : 'Not connected'}</p>
+                <p class="text-xs text-ink-3">${lumaState.demoMode ? '🧪 Demo Mode — using sample data' : (apiKey ? '✅ Connected' : 'Not connected')}</p>
               </div>
             </div>
-            ${apiKey ? `<button onclick="lumaDisconnect()" class="text-sm text-red-500 hover:text-red-700">Disconnect</button>` : ''}
+            <div class="flex gap-2">
+              ${lumaState.demoMode ? `<button onclick="lumaState.demoMode=false;lumaState.events=[];renderLuma()" class="text-xs text-ink-3 hover:text-ink-1 border border-surface-3 px-3 py-1.5 rounded-lg">Switch to Live</button>` : ''}
+              ${apiKey ? `<button onclick="lumaDisconnect()" class="text-sm text-red-500 hover:text-red-700">Disconnect</button>` : ''}
+            </div>
           </div>
-          ${!apiKey ? `
+          ${lumaState.demoMode ? `
+            <div class="grid grid-cols-3 gap-4 mt-4">
+              <div class="bg-surface-1 rounded-lg p-3 text-center">
+                <div class="text-xl font-bold text-ink-1">${events.length}</div>
+                <div class="text-xs text-ink-3">Events Found</div>
+              </div>
+              <div class="bg-surface-1 rounded-lg p-3 text-center">
+                <div class="text-xl font-bold text-brand-600">${imported}</div>
+                <div class="text-xs text-ink-3">Contacts Imported</div>
+              </div>
+              <div class="bg-surface-1 rounded-lg p-3 text-center">
+                <div class="text-xl font-bold text-ink-1">${syncLog.length}</div>
+                <div class="text-xs text-ink-3">Sync Actions</div>
+              </div>
+            </div>
+          ` : (!apiKey ? `
             <div class="mt-4">
               <label class="text-xs font-medium text-ink-2 block mb-1">Luma API Key</label>
               <p class="text-xs text-ink-4 mb-3">Find your API key at <a href="https://lu.ma/settings" target="_blank" class="text-brand-600 underline">lu.ma/settings</a> → API section</p>
@@ -1041,6 +1131,7 @@
                 <input type="password" id="lumaApiKey" placeholder="Enter your Luma API key..." class="flex-1 px-3 py-2 text-sm border border-surface-3 rounded-lg bg-surface-1 focus:outline-none focus:ring-2 focus:ring-brand-500">
                 <button onclick="lumaConnect()" class="px-6 py-2 text-sm bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700" ${loading?'disabled':''}>${loading?'Connecting...':'Connect'}</button>
               </div>
+              <button onclick="lumaState.demoMode=true;lumaConnect()" class="mt-3 text-xs text-brand-600 hover:text-brand-700 underline">or try Demo Mode with sample data →</button>
             </div>
           ` : `
             <div class="grid grid-cols-3 gap-4 mt-4">
@@ -1057,7 +1148,7 @@
                 <div class="text-xs text-ink-3">Sync Actions</div>
               </div>
             </div>
-          `}
+          `)}
         </div>
 
         ${apiKey && events.length > 0 ? `
